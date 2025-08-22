@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { DesignLayer } from '../types/design'
 
 export interface DesignStageProps {
@@ -7,7 +7,6 @@ export interface DesignStageProps {
   onSelectLayer: (layerId: string) => void
   onMoveLayer: (layerId: string, x: number, y: number) => void
   onUpdateLayer: (layerId: string, partial: Partial<DesignLayer>) => void
-  backgroundStyle?: React.CSSProperties
   stageRef?: React.RefObject<HTMLDivElement>
 }
 
@@ -20,7 +19,7 @@ interface DragState {
 }
 
 export function DesignStage(props: DesignStageProps) {
-  const { layers, selectedLayerId, onSelectLayer, onMoveLayer, backgroundStyle, stageRef } = props
+  const { layers, selectedLayerId, onSelectLayer, onMoveLayer, stageRef } = props
   const internalStageRef = useRef<HTMLDivElement>(null)
   const containerRef = stageRef ?? internalStageRef
   const [drag, setDrag] = useState<DragState | undefined>(undefined)
@@ -62,8 +61,7 @@ export function DesignStage(props: DesignStageProps) {
   return (
     <div
       ref={containerRef}
-      className="preview-stage"
-      style={backgroundStyle}
+      className="design-stage"
       onMouseDown={onBackgroundMouseDown}
     >
       {layers.map((layer) => {

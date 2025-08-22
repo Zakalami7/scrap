@@ -27,6 +27,7 @@
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+  overflow: hidden;
 }
 
 .product-mock {
@@ -36,20 +37,36 @@
   border-radius: 16px 16px 80px 80px;
 }
 
-.design-layer {
+.design-stage {
   position: absolute;
-  inset: 120px 80px 80px 80px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #111827;
-  font-weight: 600;
-  border: 1px dashed #9ca3af;
-  border-radius: 8px;
-  background: rgba(255,255,255,0.6);
+  inset: 0;
+}
+
+.layer-text {
+  user-select: none;
+}
+
+.layer-image {
+  pointer-events: none;
 }
 
 .control-group {
   display: grid;
   gap: 8px;
+}
+
+.controls button {
+  padding: 8px 12px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.controls input[type="text"],
+.controls select,
+.controls input[type="number"] {
+  padding: 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
 }
