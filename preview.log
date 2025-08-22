@@ -1,0 +1,10 @@
+
+> cree@0.0.0 preview
+> vite preview --host 0.0.0.0 --port 8080 --strictPort
+
+error when starting preview server:
+Error: Port 8080 is already in use
+    at Server.onError$1 (file:///workspace/cree/node_modules/vite/dist/node/chunks/dep-Bj7gA1-0.js:18590:28)
+    at Server.emit (node:events:518:28)
+    at emitErrorNT (node:net:1975:8)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
