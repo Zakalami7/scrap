@@ -1,4 +1,4 @@
-export type ProductType = 'cup-25' | 'cup-50' | 'cup-wine'
+export type ProductType = 'cup-25' | 'cup-50' | 'cup-wine' | 'cup-shot' | 'cup-pint'
 
 export interface DesignLayerBase {
   id: string

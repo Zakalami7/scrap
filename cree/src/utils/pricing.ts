@@ -4,6 +4,8 @@ const BASES: Record<ProductType, number> = {
   'cup-25': 0.6,
   'cup-50': 0.8,
   'cup-wine': 1.0,
+  'cup-shot': 0.4,
+  'cup-pint': 1.2,
 }
 
 const DISCOUNTS = [

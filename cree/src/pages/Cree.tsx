@@ -37,6 +37,8 @@ const PRINT_ZONES: Record<ProductType, { x: number; y: number; width: number; he
   'cup-25': { x: 120, y: 120, width: 220, height: 220 },
   'cup-50': { x: 110, y: 110, width: 240, height: 240 },
   'cup-wine': { x: 130, y: 110, width: 200, height: 220 },
+  'cup-shot': { x: 160, y: 160, width: 160, height: 160 },
+  'cup-pint': { x: 110, y: 100, width: 260, height: 260 },
 }
 
 export function Cree() {
@@ -142,7 +144,7 @@ export function Cree() {
     if (!stageWrapperRef.current) return
     const dataUrl = await toPng(stageWrapperRef.current)
     const productLabel =
-      state.product === 'cup-25' ? 'Gobelet 25cl' : state.product === 'cup-50' ? 'Gobelet 50cl' : 'Verre à vin'
+      state.product === 'cup-25' ? 'Gobelet 25cl' : state.product === 'cup-50' ? 'Gobelet 50cl' : state.product === 'cup-wine' ? 'Verre à vin' : state.product === 'cup-shot' ? 'Shooter' : 'Pinte'
     const pdf = await generateBatPdf({ previewDataUrl: dataUrl, productLabel, quantity })
     pdf.save('cree-bat.pdf')
   }
@@ -168,6 +170,8 @@ export function Cree() {
               <option value="cup-25">Gobelet 25cl</option>
               <option value="cup-50">Gobelet 50cl</option>
               <option value="cup-wine">Verre à vin</option>
+              <option value="cup-shot">Shooter</option>
+              <option value="cup-pint">Pinte</option>
             </select>
           </div>
           <div className="control-group">
