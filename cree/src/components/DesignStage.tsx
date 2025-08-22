@@ -8,6 +8,7 @@ export interface DesignStageProps {
   onMoveLayer: (layerId: string, x: number, y: number) => void
   onUpdateLayer: (layerId: string, partial: Partial<DesignLayer>) => void
   stageRef?: React.RefObject<HTMLDivElement>
+  printArea?: { x: number; y: number; width: number; height: number }
 }
 
 interface DragState {
@@ -19,7 +20,7 @@ interface DragState {
 }
 
 export function DesignStage(props: DesignStageProps) {
-  const { layers, selectedLayerId, onSelectLayer, onMoveLayer, stageRef } = props
+  const { layers, selectedLayerId, onSelectLayer, onMoveLayer, stageRef, printArea } = props
   const internalStageRef = useRef<HTMLDivElement>(null)
   const containerRef = stageRef ?? internalStageRef
   const [drag, setDrag] = useState<DragState | undefined>(undefined)
@@ -29,7 +30,19 @@ export function DesignStage(props: DesignStageProps) {
       if (!drag) return
       const dx = e.clientX - drag.startMouseX
       const dy = e.clientY - drag.startMouseY
-      onMoveLayer(drag.layerId, Math.round(drag.startX + dx), Math.round(drag.startY + dy))
+      let nextX = Math.round(drag.startX + dx)
+      let nextY = Math.round(drag.startY + dy)
+      if (printArea) {
+        const layer = layers.find(l => l.id === drag.layerId)
+        const minPad = 16
+        const layerWidth = layer && layer.type === 'image' ? layer.width : minPad
+        const layerHeight = layer && layer.type === 'image' ? layer.height : minPad
+        const maxX = printArea.x + Math.max(0, printArea.width - layerWidth)
+        const maxY = printArea.y + Math.max(0, printArea.height - layerHeight)
+        nextX = Math.min(Math.max(nextX, printArea.x), maxX)
+        nextY = Math.min(Math.max(nextY, printArea.y), maxY)
+      }
+      onMoveLayer(drag.layerId, nextX, nextY)
     }
     function handleMouseUp() {
       setDrag(undefined)
@@ -40,7 +53,7 @@ export function DesignStage(props: DesignStageProps) {
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [drag, onMoveLayer])
+  }, [drag, onMoveLayer, layers, printArea])
 
   function onLayerMouseDown(e: React.MouseEvent, layer: DesignLayer) {
     e.stopPropagation()

@@ -6,6 +6,7 @@ import { DesignStage } from '../components/DesignStage'
 import { calculatePrice } from '../utils/pricing'
 import { toPng } from 'html-to-image'
 import type { ImageLayer } from '../types/design'
+import { generateBatPdf } from '../utils/bat'
 
 function generateId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 8)}_${Date.now().toString(36)}`
@@ -30,6 +31,12 @@ const INITIAL_STATE: DesignState = {
     } as TextLayer,
   ],
   selectedLayerId: undefined,
+}
+
+const PRINT_ZONES: Record<ProductType, { x: number; y: number; width: number; height: number }> = {
+  'cup-25': { x: 120, y: 120, width: 220, height: 220 },
+  'cup-50': { x: 110, y: 110, width: 240, height: 240 },
+  'cup-wine': { x: 130, y: 110, width: 200, height: 220 },
 }
 
 export function Cree() {
@@ -68,6 +75,7 @@ export function Cree() {
   }
 
   function onAddText() {
+    const zone = PRINT_ZONES[state.product]
     const newLayer: TextLayer = {
       id: generateId('text'),
       type: 'text',
@@ -76,8 +84,8 @@ export function Cree() {
       fontSize: 18,
       color: '#111827',
       textAlign: 'left',
-      x: 40,
-      y: 40,
+      x: zone.x + 12,
+      y: zone.y + 12,
       rotationDeg: 0,
       opacity: 1,
     }
@@ -100,6 +108,7 @@ export function Cree() {
       const src = String(reader.result)
       const img = new Image()
       img.onload = () => {
+        const zone = PRINT_ZONES[state.product]
         const newLayer: DesignLayer = {
           id: generateId('img'),
           type: 'image',
@@ -108,8 +117,8 @@ export function Cree() {
           height: Math.min(200, img.height),
           naturalWidth: img.width,
           naturalHeight: img.height,
-          x: 80,
-          y: 80,
+          x: zone.x + 20,
+          y: zone.y + 20,
           rotationDeg: 0,
           opacity: 1,
         } as DesignLayer
@@ -129,11 +138,21 @@ export function Cree() {
     a.click()
   }
 
+  async function onExportBAT() {
+    if (!stageWrapperRef.current) return
+    const dataUrl = await toPng(stageWrapperRef.current)
+    const productLabel =
+      state.product === 'cup-25' ? 'Gobelet 25cl' : state.product === 'cup-50' ? 'Gobelet 50cl' : 'Verre à vin'
+    const pdf = await generateBatPdf({ previewDataUrl: dataUrl, productLabel, quantity })
+    pdf.save('cree-bat.pdf')
+  }
+
   const mockStyle: React.CSSProperties = {
     background: `linear-gradient(180deg, ${state.productColorHex}, #e5e5e5)`,
   }
 
   const price = calculatePrice(state.product, quantity)
+  const printArea = PRINT_ZONES[state.product]
 
   return (
     <div className="cree-layout">
@@ -227,18 +246,21 @@ export function Cree() {
           </div>
           <div className="control-group">
             <button onClick={onExportPNG}>Exporter PNG</button>
+            <button onClick={onExportBAT}>Exporter BAT (PDF)</button>
           </div>
         </div>
       </aside>
       <main className="cree-canvas">
         <div className="preview-stage" ref={stageWrapperRef}>
           <div className="product-mock" style={mockStyle} />
+          <div className="print-area" style={{ left: printArea.x, top: printArea.y, width: printArea.width, height: printArea.height }} />
           <DesignStage
             layers={state.layers}
             selectedLayerId={state.selectedLayerId}
             onSelectLayer={onSelectLayer}
             onMoveLayer={onMoveLayer}
             onUpdateLayer={onUpdateLayer}
+            printArea={printArea}
           />
         </div>
       </main>
