@@ -11,6 +11,8 @@ export interface DesignStageProps {
   printArea?: { x: number; y: number; width: number; height: number }
   onDragStart?: () => void
   onDragEnd?: () => void
+  snapGridPx?: number
+  showGuides?: boolean
 }
 
 interface DragState {
@@ -22,10 +24,12 @@ interface DragState {
 }
 
 export function DesignStage(props: DesignStageProps) {
-  const { layers, selectedLayerId, onSelectLayer, onMoveLayer, stageRef, printArea, onDragStart, onDragEnd } = props
+  const { layers, selectedLayerId, onSelectLayer, onMoveLayer, stageRef, printArea, onDragStart, onDragEnd, snapGridPx = 8, showGuides = true } = props
   const internalStageRef = useRef<HTMLDivElement>(null)
   const containerRef = stageRef ?? internalStageRef
   const [drag, setDrag] = useState<DragState | undefined>(undefined)
+  const [showVGuide, setShowVGuide] = useState(false)
+  const [showHGuide, setShowHGuide] = useState(false)
 
   useEffect(() => {
     function handleMouseMove(e: MouseEvent) {
@@ -34,6 +38,16 @@ export function DesignStage(props: DesignStageProps) {
       const dy = e.clientY - drag.startMouseY
       let nextX = Math.round(drag.startX + dx)
       let nextY = Math.round(drag.startY + dy)
+
+      // Grid snapping
+      if (snapGridPx > 0) {
+        nextX = Math.round(nextX / snapGridPx) * snapGridPx
+        nextY = Math.round(nextY / snapGridPx) * snapGridPx
+      }
+
+      // Clamp to print area
+      let vGuide = false
+      let hGuide = false
       if (printArea) {
         const layer = layers.find(l => l.id === drag.layerId)
         const minPad = 16
@@ -43,7 +57,28 @@ export function DesignStage(props: DesignStageProps) {
         const maxY = printArea.y + Math.max(0, printArea.height - layerHeight)
         nextX = Math.min(Math.max(nextX, printArea.x), maxX)
         nextY = Math.min(Math.max(nextY, printArea.y), maxY)
+
+        // Center guide snapping (images preferred)
+        if (showGuides && layer) {
+          const centerThreshold = 6
+          const paCenterX = printArea.x + printArea.width / 2
+          const paCenterY = printArea.y + printArea.height / 2
+          const lCenterX = nextX + (layer.type === 'image' ? layer.width / 2 : minPad / 2)
+          const lCenterY = nextY + (layer.type === 'image' ? layer.height / 2 : minPad / 2)
+          if (Math.abs(lCenterX - paCenterX) <= centerThreshold) {
+            // snap X so layer is horizontally centered
+            nextX = Math.round(paCenterX - (layer.type === 'image' ? layer.width / 2 : minPad / 2))
+            vGuide = true
+          }
+          if (Math.abs(lCenterY - paCenterY) <= centerThreshold) {
+            nextY = Math.round(paCenterY - (layer.type === 'image' ? layer.height / 2 : minPad / 2))
+            hGuide = true
+          }
+        }
       }
+
+      setShowVGuide(vGuide)
+      setShowHGuide(hGuide)
       onMoveLayer(drag.layerId, nextX, nextY)
     }
     function handleMouseUp() {
@@ -51,6 +86,8 @@ export function DesignStage(props: DesignStageProps) {
         onDragEnd && onDragEnd()
       }
       setDrag(undefined)
+      setShowVGuide(false)
+      setShowHGuide(false)
     }
     window.addEventListener('mousemove', handleMouseMove)
     window.addEventListener('mouseup', handleMouseUp)
@@ -58,11 +95,12 @@ export function DesignStage(props: DesignStageProps) {
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [drag, onMoveLayer, layers, printArea, onDragEnd])
+  }, [drag, onMoveLayer, layers, printArea, onDragEnd, snapGridPx, showGuides])
 
   function onLayerMouseDown(e: React.MouseEvent, layer: DesignLayer) {
     e.stopPropagation()
     onSelectLayer(layer.id)
+    if (layer.locked) return
     onDragStart && onDragStart()
     setDrag({
       layerId: layer.id,
@@ -83,6 +121,16 @@ export function DesignStage(props: DesignStageProps) {
       className="design-stage"
       onMouseDown={onBackgroundMouseDown}
     >
+      {printArea && showGuides && (
+        <>
+          {showVGuide && (
+            <div className="guide-line guide-vertical" style={{ left: printArea.x + printArea.width / 2 }} />
+          )}
+          {showHGuide && (
+            <div className="guide-line guide-horizontal" style={{ top: printArea.y + printArea.height / 2 }} />
+          )}
+        </>
+      )}
       {layers.map((layer) => {
         const isSelected = layer.id === selectedLayerId
         const baseStyle: React.CSSProperties = {
@@ -92,9 +140,10 @@ export function DesignStage(props: DesignStageProps) {
           transform: `translate(${layer.x}px, ${layer.y}px) rotate(${layer.rotationDeg}deg)`,
           transformOrigin: 'top left',
           opacity: layer.opacity,
-          cursor: 'move',
+          cursor: layer.locked ? 'not-allowed' : 'move',
           outline: isSelected ? '2px solid #2563eb' : 'none',
           boxShadow: isSelected ? '0 0 0 4px rgba(37,99,235,0.15)' : undefined,
+          pointerEvents: 'auto',
         }
         if (layer.type === 'text') {
           return (
@@ -111,6 +160,8 @@ export function DesignStage(props: DesignStageProps) {
                 textAlign: layer.textAlign,
                 padding: 4,
                 background: 'transparent',
+                userSelect: 'none',
+                opacity: layer.locked ? Math.min(layer.opacity, 0.85) : layer.opacity,
               }}
             >
               {layer.text}
@@ -131,6 +182,7 @@ export function DesignStage(props: DesignStageProps) {
                 width: layer.width,
                 height: layer.height,
                 userSelect: 'none',
+                opacity: layer.locked ? Math.min(layer.opacity, 0.85) : layer.opacity,
               }}
             />
           )

@@ -32,6 +32,7 @@ const INITIAL_STATE: DesignState = {
       y: 160,
       rotationDeg: 0,
       opacity: 1,
+      locked: false,
     } as TextLayer,
   ],
   selectedLayerId: undefined,
@@ -105,18 +106,14 @@ export function Cree() {
       y: zone.y + 12,
       rotationDeg: 0,
       opacity: 1,
+      locked: false,
     }
     setState(prev => ({ ...prev, layers: [...prev.layers, newLayer], selectedLayerId: newLayer.id }))
   }
 
-  function onDeleteSelected() {
-    if (!state.selectedLayerId) return
-    pushHistory()
-    setState(prev => ({
-      ...prev,
-      layers: prev.layers.filter(l => l.id !== prev.selectedLayerId),
-      selectedLayerId: undefined,
-    }))
+  function onToggleLock() {
+    if (!selectedLayer) return
+    onUpdateLayer(selectedLayer.id, { locked: !selectedLayer.locked })
   }
 
   function onChangeProduct(e: React.ChangeEvent<HTMLSelectElement>) {
@@ -137,7 +134,7 @@ export function Cree() {
       img.onload = () => {
         const zone = PRINT_ZONES[state.product]
         pushHistory()
-        const newLayer: DesignLayer = {
+        const newLayer: ImageLayer = {
           id: generateId('img'),
           type: 'image',
           src,
@@ -149,7 +146,8 @@ export function Cree() {
           y: zone.y + 20,
           rotationDeg: 0,
           opacity: 1,
-        } as DesignLayer
+          locked: false,
+        }
         setState(prev => ({ ...prev, layers: [...prev.layers, newLayer], selectedLayerId: newLayer.id }))
       }
       img.src = src
@@ -253,6 +251,16 @@ export function Cree() {
     reader.readAsText(file)
   }
 
+  function onDeleteSelected() {
+    if (!state.selectedLayerId) return
+    pushHistory()
+    setState(prev => ({
+      ...prev,
+      layers: prev.layers.filter(l => l.id !== prev.selectedLayerId),
+      selectedLayerId: undefined,
+    }))
+  }
+
   const mockStyle: React.CSSProperties = {
     background: `linear-gradient(180deg, ${state.productColorHex}, #e5e5e5)`,
   }
@@ -286,6 +294,11 @@ export function Cree() {
             <button onClick={onAddText}>Ajouter un texte</button>
             <input type="file" accept="image/*" onChange={onImageUpload} />
           </div>
+          {selectedLayer && (
+            <div className="control-group">
+              <button onClick={onToggleLock}>{selectedLayer.locked ? 'Déverrouiller le calque' : 'Verrouiller le calque'}</button>
+            </div>
+          )}
           {selectedLayer && selectedLayer.type === 'text' && (
             <div className="control-group">
               <label>Texte</label>
@@ -293,6 +306,7 @@ export function Cree() {
                 type="text"
                 value={selectedLayer.text}
                 onChange={(e) => onUpdateLayer(selectedLayer.id, { text: e.target.value })}
+                disabled={selectedLayer.locked}
               />
               <label>Taille</label>
               <input
@@ -301,11 +315,13 @@ export function Cree() {
                 max={72}
                 value={selectedLayer.fontSize}
                 onChange={(e) => onUpdateLayer(selectedLayer.id, { fontSize: Number(e.target.value) })}
+                disabled={selectedLayer.locked}
               />
               <label>Alignement</label>
               <select
                 value={selectedLayer.textAlign}
                 onChange={(e) => onUpdateLayer(selectedLayer.id, { textAlign: e.target.value as any })}
+                disabled={selectedLayer.locked}
               >
                 <option value="left">Gauche</option>
                 <option value="center">Centre</option>
@@ -316,12 +332,36 @@ export function Cree() {
                 type="color"
                 value={selectedLayer.color}
                 onChange={(e) => onUpdateLayer(selectedLayer.id, { color: e.target.value })}
+                disabled={selectedLayer.locked}
               />
             </div>
           )}
-          {selectedLayer && (
+          {selectedLayer && selectedLayer.type === 'image' && (
             <div className="control-group">
-              <button onClick={onDeleteSelected}>Supprimer le calque</button>
+              <label>Largeur (px)</label>
+              <input
+                type="number"
+                min={16}
+                value={selectedLayer.width}
+                onChange={(e) => {
+                  const w = Math.max(16, Number(e.target.value) || 0)
+                  const ratio = selectedLayer.naturalWidth && selectedLayer.naturalHeight ? selectedLayer.naturalHeight / selectedLayer.naturalWidth : selectedLayer.height / selectedLayer.width
+                  onUpdateLayer(selectedLayer.id, { width: w, height: Math.round(w * ratio) })
+                }}
+                disabled={selectedLayer.locked}
+              />
+              <label>Hauteur (px)</label>
+              <input
+                type="number"
+                min={16}
+                value={selectedLayer.height}
+                onChange={(e) => {
+                  const h = Math.max(16, Number(e.target.value) || 0)
+                  const ratio = selectedLayer.naturalWidth && selectedLayer.naturalHeight ? selectedLayer.naturalWidth / selectedLayer.naturalHeight : selectedLayer.width / selectedLayer.height
+                  onUpdateLayer(selectedLayer.id, { height: h, width: Math.round(h * ratio) })
+                }}
+                disabled={selectedLayer.locked}
+              />
             </div>
           )}
           <div className="control-group">
@@ -332,6 +372,7 @@ export function Cree() {
               max={180}
               value={selectedLayer?.rotationDeg ?? 0}
               onChange={(e) => selectedLayer && onUpdateLayer(selectedLayer.id!, { rotationDeg: Number(e.target.value) })}
+              disabled={!selectedLayer || selectedLayer.locked}
             />
             <label>Opacité</label>
             <input
@@ -341,6 +382,7 @@ export function Cree() {
               step={0.05}
               value={selectedLayer?.opacity ?? 1}
               onChange={(e) => selectedLayer && onUpdateLayer(selectedLayer.id!, { opacity: Number(e.target.value) })}
+              disabled={!selectedLayer || selectedLayer.locked}
             />
           </div>
           <div className="control-group">
@@ -383,6 +425,8 @@ export function Cree() {
             onUpdateLayer={onUpdateLayer}
             printArea={printArea}
             onDragStart={() => pushHistory()}
+            snapGridPx={8}
+            showGuides
           />
         </div>
       </main>

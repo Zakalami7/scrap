@@ -6,6 +6,7 @@ export interface DesignLayerBase {
   y: number
   rotationDeg: number
   opacity: number
+  locked?: boolean
 }
 
 export interface TextLayer extends DesignLayerBase {

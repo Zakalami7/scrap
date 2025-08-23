@@ -65,6 +65,23 @@
   pointer-events: none;
 }
 
+.guide-line {
+  position: absolute;
+  background: #60a5fa;
+  opacity: 0.7;
+  z-index: 2;
+}
+.guide-vertical {
+  top: 0;
+  bottom: 0;
+  width: 2px;
+}
+.guide-horizontal {
+  left: 0;
+  right: 0;
+  height: 2px;
+}
+
 .control-group {
   display: grid;
   gap: 8px;
