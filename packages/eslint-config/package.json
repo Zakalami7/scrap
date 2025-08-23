@@ -1,0 +1,13 @@
+{
+  "name": "@freelancelinkai/eslint-config",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "peerDependencies": {
+    "eslint": "^8 || ^9",
+    "@typescript-eslint/parser": "^7 || ^8",
+    "@typescript-eslint/eslint-plugin": "^7 || ^8",
+    "eslint-plugin-import": "^2",
+    "eslint-config-prettier": "^9"
+  }
+}

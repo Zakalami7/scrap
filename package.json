@@ -1,0 +1,23 @@
+{
+  "name": "freelancelinkai",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "services/*"
+  ],
+  "scripts": {
+    "build": "npm -ws run build",
+    "dev": "concurrently -k -n api,web -c blue,green \"npm:dev --workspace @freelancelinkai/api\" \"npm:dev --workspace @freelancelinkai/web\"",
+    "lint": "npm -ws run lint"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.40.0",
+    "@typescript-eslint/parser": "^8.40.0",
+    "concurrently": "^9.2.0",
+    "eslint": "^9.34.0",
+    "eslint-config-prettier": "^9.1.2",
+    "eslint-plugin-import": "^2.32.0",
+    "prettier": "^3.6.2"
+  }
+}
