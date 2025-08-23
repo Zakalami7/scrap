@@ -9,6 +9,8 @@ export interface DesignStageProps {
   onUpdateLayer: (layerId: string, partial: Partial<DesignLayer>) => void
   stageRef?: React.RefObject<HTMLDivElement>
   printArea?: { x: number; y: number; width: number; height: number }
+  onDragStart?: () => void
+  onDragEnd?: () => void
 }
 
 interface DragState {
@@ -20,7 +22,7 @@ interface DragState {
 }
 
 export function DesignStage(props: DesignStageProps) {
-  const { layers, selectedLayerId, onSelectLayer, onMoveLayer, stageRef, printArea } = props
+  const { layers, selectedLayerId, onSelectLayer, onMoveLayer, stageRef, printArea, onDragStart, onDragEnd } = props
   const internalStageRef = useRef<HTMLDivElement>(null)
   const containerRef = stageRef ?? internalStageRef
   const [drag, setDrag] = useState<DragState | undefined>(undefined)
@@ -45,6 +47,9 @@ export function DesignStage(props: DesignStageProps) {
       onMoveLayer(drag.layerId, nextX, nextY)
     }
     function handleMouseUp() {
+      if (drag) {
+        onDragEnd && onDragEnd()
+      }
       setDrag(undefined)
     }
     window.addEventListener('mousemove', handleMouseMove)
@@ -53,11 +58,12 @@ export function DesignStage(props: DesignStageProps) {
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [drag, onMoveLayer, layers, printArea])
+  }, [drag, onMoveLayer, layers, printArea, onDragEnd])
 
   function onLayerMouseDown(e: React.MouseEvent, layer: DesignLayer) {
     e.stopPropagation()
     onSelectLayer(layer.id)
+    onDragStart && onDragStart()
     setDrag({
       layerId: layer.id,
       startMouseX: e.clientX,

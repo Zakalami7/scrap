@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import './cree.css'
 import type { DesignLayer, DesignState, ProductType, TextLayer } from '../types/design'
@@ -10,6 +10,10 @@ import { generateBatPdf } from '../utils/bat'
 
 function generateId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 8)}_${Date.now().toString(36)}`
+}
+
+function deepClone<T>(v: T): T {
+  return JSON.parse(JSON.stringify(v))
 }
 
 const INITIAL_STATE: DesignState = {
@@ -44,16 +48,25 @@ const PRINT_ZONES: Record<ProductType, { x: number; y: number; width: number; he
 export function Cree() {
   const [state, setState] = useState<DesignState>(INITIAL_STATE)
   const [quantity, setQuantity] = useState<number>(100)
+  const [past, setPast] = useState<DesignState[]>([])
+  const [future, setFuture] = useState<DesignState[]>([])
   const stageWrapperRef = useRef<HTMLDivElement>(null)
 
   const selectedLayer = useMemo(() => state.layers.find(l => l.id === state.selectedLayerId), [state.layers, state.selectedLayerId])
 
-  function updateState(partial: Partial<DesignState>) {
+  function pushHistory(snapshot?: DesignState) {
+    const snap = snapshot ?? state
+    setPast(p => [...p, deepClone(snap)])
+    setFuture([])
+  }
+
+  function updateState(partial: Partial<DesignState>, push = true) {
+    if (push) pushHistory()
     setState(prev => ({ ...prev, ...partial }))
   }
 
   function onSelectLayer(layerId: string) {
-    updateState({ selectedLayerId: layerId || undefined })
+    updateState({ selectedLayerId: layerId || undefined }, false)
   }
 
   function onMoveLayer(layerId: string, x: number, y: number) {
@@ -64,6 +77,7 @@ export function Cree() {
   }
 
   function onUpdateLayer(layerId: string, partial: Partial<DesignLayer>) {
+    pushHistory()
     setState(prev => ({
       ...prev,
       layers: prev.layers.map(l => {
@@ -78,6 +92,7 @@ export function Cree() {
 
   function onAddText() {
     const zone = PRINT_ZONES[state.product]
+    pushHistory()
     const newLayer: TextLayer = {
       id: generateId('text'),
       type: 'text',
@@ -92,6 +107,16 @@ export function Cree() {
       opacity: 1,
     }
     setState(prev => ({ ...prev, layers: [...prev.layers, newLayer], selectedLayerId: newLayer.id }))
+  }
+
+  function onDeleteSelected() {
+    if (!state.selectedLayerId) return
+    pushHistory()
+    setState(prev => ({
+      ...prev,
+      layers: prev.layers.filter(l => l.id !== prev.selectedLayerId),
+      selectedLayerId: undefined,
+    }))
   }
 
   function onChangeProduct(e: React.ChangeEvent<HTMLSelectElement>) {
@@ -111,6 +136,7 @@ export function Cree() {
       const img = new Image()
       img.onload = () => {
         const zone = PRINT_ZONES[state.product]
+        pushHistory()
         const newLayer: DesignLayer = {
           id: generateId('img'),
           type: 'image',
@@ -131,6 +157,46 @@ export function Cree() {
     reader.readAsDataURL(file)
   }
 
+  function undo() {
+    setPast(p => {
+      if (p.length === 0) return p
+      setFuture(f => [deepClone(state), ...f])
+      const prevState = p[p.length - 1]
+      setState(deepClone(prevState))
+      return p.slice(0, -1)
+    })
+  }
+
+  function redo() {
+    setFuture(f => {
+      if (f.length === 0) return f
+      setPast(p => [...p, deepClone(state)])
+      const next = f[0]
+      setState(deepClone(next))
+      return f.slice(1)
+    })
+  }
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      const isMod = e.ctrlKey || e.metaKey
+      if (isMod && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        undo()
+      } else if ((isMod && e.key.toLowerCase() === 'y') || (isMod && e.key.toLowerCase() === 'z' && e.shiftKey)) {
+        e.preventDefault()
+        redo()
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (state.selectedLayerId) {
+          e.preventDefault()
+          onDeleteSelected()
+        }
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [state.selectedLayerId, state])
+
   async function onExportPNG() {
     if (!stageWrapperRef.current) return
     const dataUrl = await toPng(stageWrapperRef.current)
@@ -147,6 +213,44 @@ export function Cree() {
       state.product === 'cup-25' ? 'Gobelet 25cl' : state.product === 'cup-50' ? 'Gobelet 50cl' : state.product === 'cup-wine' ? 'Verre à vin' : state.product === 'cup-shot' ? 'Shooter' : 'Pinte'
     const pdf = await generateBatPdf({ previewDataUrl: dataUrl, productLabel, quantity })
     pdf.save('cree-bat.pdf')
+  }
+
+  function saveToLocal() {
+    localStorage.setItem('cree-design', JSON.stringify(state))
+  }
+
+  function loadFromLocal() {
+    const raw = localStorage.getItem('cree-design')
+    if (!raw) return
+    try {
+      const parsed = JSON.parse(raw) as DesignState
+      pushHistory()
+      setState(parsed)
+    } catch {}
+  }
+
+  function exportJSON() {
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'cree-design.json'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function importJSON(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result)) as DesignState
+        pushHistory()
+        setState(parsed)
+      } catch {}
+    }
+    reader.readAsText(file)
   }
 
   const mockStyle: React.CSSProperties = {
@@ -217,25 +321,28 @@ export function Cree() {
           )}
           {selectedLayer && (
             <div className="control-group">
-              <label>Rotation</label>
-              <input
-                type="range"
-                min={-180}
-                max={180}
-                value={selectedLayer.rotationDeg}
-                onChange={(e) => onUpdateLayer(selectedLayer.id!, { rotationDeg: Number(e.target.value) })}
-              />
-              <label>Opacité</label>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={selectedLayer.opacity}
-                onChange={(e) => onUpdateLayer(selectedLayer.id!, { opacity: Number(e.target.value) })}
-              />
+              <button onClick={onDeleteSelected}>Supprimer le calque</button>
             </div>
           )}
+          <div className="control-group">
+            <label>Rotation</label>
+            <input
+              type="range"
+              min={-180}
+              max={180}
+              value={selectedLayer?.rotationDeg ?? 0}
+              onChange={(e) => selectedLayer && onUpdateLayer(selectedLayer.id!, { rotationDeg: Number(e.target.value) })}
+            />
+            <label>Opacité</label>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={selectedLayer?.opacity ?? 1}
+              onChange={(e) => selectedLayer && onUpdateLayer(selectedLayer.id!, { opacity: Number(e.target.value) })}
+            />
+          </div>
           <div className="control-group">
             <label>Quantité</label>
             <input
@@ -252,6 +359,16 @@ export function Cree() {
             <button onClick={onExportPNG}>Exporter PNG</button>
             <button onClick={onExportBAT}>Exporter BAT (PDF)</button>
           </div>
+          <div className="control-group">
+            <button onClick={undo} disabled={past.length === 0}>Annuler (Ctrl/Cmd+Z)</button>
+            <button onClick={redo} disabled={future.length === 0}>Rétablir (Ctrl+Y)</button>
+          </div>
+          <div className="control-group">
+            <button onClick={saveToLocal}>Sauvegarder (local)</button>
+            <button onClick={loadFromLocal}>Charger</button>
+            <button onClick={exportJSON}>Exporter JSON</button>
+            <input type="file" accept="application/json" onChange={importJSON} />
+          </div>
         </div>
       </aside>
       <main className="cree-canvas">
@@ -265,6 +382,7 @@ export function Cree() {
             onMoveLayer={onMoveLayer}
             onUpdateLayer={onUpdateLayer}
             printArea={printArea}
+            onDragStart={() => pushHistory()}
           />
         </div>
       </main>
