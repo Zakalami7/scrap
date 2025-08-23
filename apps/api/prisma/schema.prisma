@@ -95,6 +95,8 @@ model Application {
   coverLetter  String?
   status       String            @default("PENDING")
   createdAt    DateTime          @default(now())
+
+  @@unique([projectId, freelancerId])
 }
 
 model Assignment {

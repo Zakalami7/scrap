@@ -200,6 +200,81 @@ app.get('/projects/:id/recommendations', async (req, res) => {
   }
 });
 
+app.post('/projects/:id/applications', async (req, res) => {
+  try {
+    const paramsSchema = z.object({ id: z.string().min(1) });
+    const bodySchema = z.object({ freelancerId: z.string().min(1), coverLetter: z.string().optional() });
+    const { id } = paramsSchema.parse(req.params);
+    const { freelancerId, coverLetter } = bodySchema.parse(req.body);
+
+    const [project, freelancer] = await Promise.all([
+      prisma.project.findUnique({ where: { id } }),
+      prisma.freelancerProfile.findUnique({ where: { id: freelancerId } }),
+    ]);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    if (!freelancer) return res.status(404).json({ error: 'Freelancer not found' });
+
+    const existing = await prisma.application.findFirst({ where: { projectId: id, freelancerId } });
+    let application;
+    if (existing) {
+      application = await prisma.application.update({
+        where: { id: existing.id },
+        data: { coverLetter, status: 'PENDING' },
+        include: { freelancer: { include: { user: true, skills: { include: { skill: true } } } } },
+      });
+    } else {
+      application = await prisma.application.create({
+        data: { projectId: id, freelancerId, coverLetter, status: 'PENDING' },
+        include: { freelancer: { include: { user: true, skills: { include: { skill: true } } } } },
+      });
+    }
+
+    res.status(201).json(application);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/projects/:id/applications', async (req, res) => {
+  try {
+    const paramsSchema = z.object({ id: z.string().min(1) });
+    const { id } = paramsSchema.parse(req.params);
+
+    const apps = await prisma.application.findMany({
+      where: { projectId: id },
+      orderBy: { createdAt: 'desc' },
+      include: { freelancer: { include: { user: true } } },
+    });
+    res.json(apps);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.patch('/applications/:id', async (req, res) => {
+  try {
+    const paramsSchema = z.object({ id: z.string().min(1) });
+    const bodySchema = z.object({ status: z.enum(['PENDING', 'ACCEPTED', 'REJECTED']) });
+    const { id } = paramsSchema.parse(req.params);
+    const { status } = bodySchema.parse(req.body);
+
+    const application = await prisma.application.update({ where: { id }, data: { status } });
+
+    if (status === 'ACCEPTED') {
+      // Create assignment if not exists and mark project as ASSIGNED
+      const existing = await prisma.assignment.findFirst({ where: { projectId: application.projectId } });
+      if (!existing) {
+        await prisma.assignment.create({ data: { projectId: application.projectId, freelancerId: application.freelancerId, status: 'ACTIVE' } });
+      }
+      await prisma.project.update({ where: { id: application.projectId }, data: { status: 'ASSIGNED' } });
+    }
+
+    res.json(application);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   // eslint-disable-next-line no-console
