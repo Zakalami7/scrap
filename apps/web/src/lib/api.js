@@ -1,6 +1,14 @@
+import { getToken } from './auth';
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+function headers(extra = {}) {
+    const token = getToken();
+    return {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...extra
+    };
+}
 export async function apiGet(path) {
-    const res = await fetch(`${API_BASE}${path}`);
+    const res = await fetch(`${API_BASE}${path}`, { headers: headers() });
     if (!res.ok)
         throw new Error(`GET ${path} failed: ${res.status}`);
     return res.json();
@@ -8,7 +16,7 @@ export async function apiGet(path) {
 export async function apiPost(path, body) {
     const res = await fetch(`${API_BASE}${path}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: headers({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(body)
     });
     if (!res.ok)
@@ -18,7 +26,7 @@ export async function apiPost(path, body) {
 export async function apiPatch(path, body) {
     const res = await fetch(`${API_BASE}${path}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: headers({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(body)
     });
     if (!res.ok)

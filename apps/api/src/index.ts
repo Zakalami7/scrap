@@ -3,12 +3,97 @@ import express from 'express';
 import cors from 'cors';
 import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 
 const app = express();
 const prisma = new PrismaClient();
 
+// Auth helpers
+const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
+
+type AuthPayload = { sub: string; role: string };
+
+function signToken(userId: string, role: string): string {
+  return jwt.sign({ sub: userId, role } as AuthPayload, JWT_SECRET, { expiresIn: '7d' });
+}
+
+function getAuthPayload(req: express.Request): AuthPayload | null {
+  const auth = req.headers.authorization || '';
+  const [scheme, token] = auth.split(' ');
+  if (scheme !== 'Bearer' || !token) return null;
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as jwt.JwtPayload;
+    return { sub: String(decoded.sub), role: String((decoded as any).role) };
+  } catch {
+    return null;
+  }
+}
+
+function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const payload = getAuthPayload(req);
+  if (!payload) return res.status(401).json({ error: 'Unauthorized' });
+  (req as any).auth = payload;
+  next();
+}
+
+function requireRole(role: 'COMPANY' | 'FREELANCER') {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const payload = getAuthPayload(req);
+    if (!payload) return res.status(401).json({ error: 'Unauthorized' });
+    if (payload.role !== role) return res.status(403).json({ error: 'Forbidden' });
+    (req as any).auth = payload;
+    next();
+  };
+}
+
 app.use(cors());
 app.use(express.json());
+
+// Auth routes
+app.post('/auth/register', async (req, res) => {
+  try {
+    const bodySchema = z.object({
+      email: z.string().email(),
+      password: z.string().min(6),
+      name: z.string().optional(),
+      role: z.enum(['FREELANCER', 'COMPANY'])
+    });
+    const { email, password, name, role } = bodySchema.parse(req.body);
+
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) return res.status(409).json({ error: 'Email already registered' });
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const user = await prisma.user.create({ data: { email, name, role, passwordHash } });
+    if (role === 'COMPANY') {
+      await prisma.company.create({ data: { userId: user.id, name: name || email } });
+    } else {
+      await prisma.freelancerProfile.create({ data: { userId: user.id } });
+    }
+    const full = await prisma.user.findUnique({ where: { id: user.id }, include: { company: true, freelancerProfile: true } });
+    const token = signToken(user.id, role);
+    res.status(201).json({ token, user: full });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/auth/login', async (req, res) => {
+  try {
+    const bodySchema = z.object({ email: z.string().email(), password: z.string().min(6) });
+    const { email, password } = bodySchema.parse(req.body);
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user || !user.passwordHash) return res.status(401).json({ error: 'Invalid credentials' });
+    const ok = await bcrypt.compare(password, user.passwordHash);
+    if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
+    const token = signToken(user.id, user.role);
+    const full = await prisma.user.findUnique({ where: { id: user.id }, include: { company: true, freelancerProfile: true } });
+    res.json({ token, user: full });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
 
 app.get('/health', async (_req, res) => {
   try {
@@ -59,20 +144,28 @@ app.get('/freelancers', async (req, res) => {
   const location = (req.query.location as string) || undefined;
   const freelancers = await prisma.freelancerProfile.findMany({
     where: {
-      location: location ? { contains: location, mode: 'insensitive' } : undefined,
-      skills: skill ? { some: { skill: { name: { equals: skill, mode: 'insensitive' } } } } : undefined,
+      location: location ? { contains: location } : undefined,
+      skills: skill ? { some: { skill: { name: { equals: skill } } } } : undefined,
     },
     include: { user: true, skills: { include: { skill: true } } },
   });
   res.json(freelancers);
 });
 
-app.post('/freelancers/:id/skills', async (req, res) => {
+// Protect selected routes
+// Add auth check to add freelancer skills
+app.post('/freelancers/:id/skills', requireAuth, async (req, res) => {
   try {
     const paramsSchema = z.object({ id: z.string().min(1) });
     const bodySchema = z.object({ skills: z.array(z.string().min(1)).nonempty() });
     const { id } = paramsSchema.parse(req.params);
     const { skills } = bodySchema.parse(req.body);
+
+    const auth = (req as any).auth as AuthPayload;
+    if (auth.role === 'FREELANCER') {
+      const me = await prisma.freelancerProfile.findFirst({ where: { userId: auth.sub } });
+      if (!me || me.id !== id) return res.status(403).json({ error: 'Forbidden' });
+    }
 
     const profile = await prisma.freelancerProfile.findUnique({ where: { id }, include: { user: true } });
     if (!profile) return res.status(404).json({ error: 'Freelancer not found' });
@@ -82,10 +175,9 @@ app.post('/freelancers/:id/skills', async (req, res) => {
       const s = await prisma.skill.upsert({ where: { name }, update: {}, create: { name } });
       skillRecords.push(s);
     }
-    await prisma.freelancerSkill.createMany({
-      data: skillRecords.map((s) => ({ freelancerId: id, skillId: s.id })),
-      skipDuplicates: true,
-    });
+    for (const s of skillRecords) {
+      try { await prisma.freelancerSkill.create({ data: { freelancerId: id, skillId: s.id } }); } catch {}
+    }
 
     const updated = await prisma.freelancerProfile.findUnique({
       where: { id },
@@ -97,12 +189,22 @@ app.post('/freelancers/:id/skills', async (req, res) => {
   }
 });
 
-app.post('/projects', async (req, res) => {
+// Require auth to create projects; default to company of authenticated user if not provided
+app.post('/projects', requireAuth, async (req, res) => {
   try {
-    const { companyId, title, description, requiredSkills = [] } = req.body as {
-      companyId: string; title: string; description: string; requiredSkills?: string[]
+    const { companyId: bodyCompanyId, title, description, requiredSkills = [] } = req.body as {
+      companyId?: string; title: string; description: string; requiredSkills?: string[]
     };
-    if (!companyId || !title || !description) return res.status(400).json({ error: 'companyId, title, description required' });
+    if (!title || !description) return res.status(400).json({ error: 'title, description required' });
+
+    let companyId = bodyCompanyId;
+    const auth = (req as any).auth as AuthPayload;
+    if (!companyId) {
+      const comp = await prisma.company.findFirst({ where: { userId: auth.sub } });
+      if (!comp) return res.status(400).json({ error: 'companyId required' });
+      companyId = comp.id;
+    }
+
     const project = await prisma.project.create({ data: { companyId, title, description } });
     if (Array.isArray(requiredSkills) && requiredSkills.length) {
       for (const skillName of requiredSkills) {
@@ -200,12 +302,23 @@ app.get('/projects/:id/recommendations', async (req, res) => {
   }
 });
 
-app.post('/projects/:id/applications', async (req, res) => {
+// Applications: auth required; freelancers can only apply as themselves
+app.post('/projects/:id/applications', requireAuth, async (req, res) => {
   try {
     const paramsSchema = z.object({ id: z.string().min(1) });
-    const bodySchema = z.object({ freelancerId: z.string().min(1), coverLetter: z.string().optional() });
+    const bodySchema = z.object({ freelancerId: z.string().optional(), coverLetter: z.string().optional() });
     const { id } = paramsSchema.parse(req.params);
-    const { freelancerId, coverLetter } = bodySchema.parse(req.body);
+    const { coverLetter } = bodySchema.parse(req.body);
+
+    const auth = (req as any).auth as AuthPayload;
+    let freelancerId = (req.body && req.body.freelancerId) || undefined;
+    if (auth.role === 'FREELANCER') {
+      const me = await prisma.freelancerProfile.findFirst({ where: { userId: auth.sub } });
+      if (!me) return res.status(400).json({ error: 'No freelancer profile' });
+      if (freelancerId && freelancerId !== me.id) return res.status(403).json({ error: 'Forbidden' });
+      freelancerId = me.id;
+    }
+    if (!freelancerId) return res.status(400).json({ error: 'freelancerId required' });
 
     const [project, freelancer] = await Promise.all([
       prisma.project.findUnique({ where: { id } }),
@@ -251,7 +364,8 @@ app.get('/projects/:id/applications', async (req, res) => {
   }
 });
 
-app.patch('/applications/:id', async (req, res) => {
+// Accept/Reject: company only
+app.patch('/applications/:id', requireRole('COMPANY'), async (req, res) => {
   try {
     const paramsSchema = z.object({ id: z.string().min(1) });
     const bodySchema = z.object({ status: z.enum(['PENDING', 'ACCEPTED', 'REJECTED']) });
@@ -261,7 +375,6 @@ app.patch('/applications/:id', async (req, res) => {
     const application = await prisma.application.update({ where: { id }, data: { status } });
 
     if (status === 'ACCEPTED') {
-      // Create assignment if not exists and mark project as ASSIGNED
       const existing = await prisma.assignment.findFirst({ where: { projectId: application.projectId } });
       if (!existing) {
         await prisma.assignment.create({ data: { projectId: application.projectId, freelancerId: application.freelancerId, status: 'ACTIVE' } });

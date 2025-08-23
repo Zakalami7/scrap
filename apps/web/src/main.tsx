@@ -6,6 +6,8 @@ import { HomePage } from './pages/HomePage';
 import { FreelancersPage } from './pages/FreelancersPage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { RecommendationsPage } from './pages/RecommendationsPage';
+import { LoginPage } from './pages/LoginPage';
+import { RegisterPage } from './pages/RegisterPage';
 
 const router = createBrowserRouter([
   {
@@ -15,7 +17,9 @@ const router = createBrowserRouter([
       { index: true, element: <HomePage /> },
       { path: 'freelancers', element: <FreelancersPage /> },
       { path: 'projects', element: <ProjectsPage /> },
-      { path: 'recommendations', element: <RecommendationsPage /> }
+      { path: 'recommendations', element: <RecommendationsPage /> },
+      { path: 'login', element: <LoginPage /> },
+      { path: 'register', element: <RegisterPage /> }
     ]
   }
 ]);
