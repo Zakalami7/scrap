@@ -141,6 +141,47 @@ app.get('/projects/:id/recommendations', async (req, res) => {
       include: { user: true, skills: { include: { skill: true } } },
     });
 
+    const serviceUrl = process.env.RECO_SERVICE_URL;
+    if (serviceUrl) {
+      try {
+        const payload = {
+          project: {
+            id: project.id,
+            title: project.title,
+            description: project.description,
+            location: project.location,
+            requiredSkills: project.requiredSkills.map((rs) => ({ id: rs.skillId, name: rs.skill.name })),
+          },
+          candidates: candidates.map((f) => ({
+            id: f.id,
+            title: f.title,
+            location: f.location,
+            ratingAvg: f.ratingAvg,
+            skills: f.skills.map((fs) => ({ id: fs.skillId, name: fs.skill.name })),
+          })),
+          limit,
+        };
+        const r = await fetch(`${serviceUrl}/recommend`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (r.ok) {
+          const data = await r.json();
+          const items: Array<{ freelancerId: string; score: number }> = data.recommendations || [];
+          const byId = new Map(candidates.map((c) => [c.id, c] as const));
+          const mapped = items
+            .map((it) => ({ freelancer: byId.get(it.freelancerId), score: it.score }))
+            .filter((m) => m.freelancer)
+            .slice(0, limit);
+          return res.json(mapped);
+        }
+        // fallthrough to heuristic on non-OK
+      } catch (_) {
+        // ignore and fallback
+      }
+    }
+
     const recos = candidates
       .map((f) => {
         const freelancerSkillIds = f.skills.map((fs) => fs.skillId);
