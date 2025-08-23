@@ -1,6 +1,6 @@
 
 > cree@0.0.0 preview
-> vite preview --host 0.0.0.0 --port 8080 --strictPort
+> vite preview --host 0.0.0.0 --port 8080 --host 0.0.0.0 --port 8080 --strictPort
 
 error when starting preview server:
 Error: Port 8080 is already in use
