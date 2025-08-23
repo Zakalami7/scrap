@@ -4,7 +4,8 @@ import type { DesignLayer } from '../types/design'
 export interface DesignStageProps {
   layers: DesignLayer[]
   selectedLayerId?: string
-  onSelectLayer: (layerId: string) => void
+  selectedLayerIds?: string[]
+  onSelectLayer: (layerId: string, options?: { additive?: boolean }) => void
   onMoveLayer: (layerId: string, x: number, y: number) => void
   onUpdateLayer: (layerId: string, partial: Partial<DesignLayer>) => void
   stageRef?: React.RefObject<HTMLDivElement>
@@ -19,12 +20,12 @@ interface DragState {
   layerId: string
   startMouseX: number
   startMouseY: number
-  startX: number
-  startY: number
+  selectedIds: string[]
+  startPositions: Record<string, { x: number; y: number }>
 }
 
 export function DesignStage(props: DesignStageProps) {
-  const { layers, selectedLayerId, onSelectLayer, onMoveLayer, stageRef, printArea, onDragStart, onDragEnd, snapGridPx = 8, showGuides = true } = props
+  const { layers, selectedLayerId, selectedLayerIds = [], onSelectLayer, onMoveLayer, stageRef, printArea, onDragStart, onDragEnd, snapGridPx = 8, showGuides = true } = props
   const internalStageRef = useRef<HTMLDivElement>(null)
   const containerRef = stageRef ?? internalStageRef
   const [drag, setDrag] = useState<DragState | undefined>(undefined)
@@ -36,50 +37,58 @@ export function DesignStage(props: DesignStageProps) {
       if (!drag) return
       const dx = e.clientX - drag.startMouseX
       const dy = e.clientY - drag.startMouseY
-      let nextX = Math.round(drag.startX + dx)
-      let nextY = Math.round(drag.startY + dy)
 
-      // Grid snapping
-      if (snapGridPx > 0) {
-        nextX = Math.round(nextX / snapGridPx) * snapGridPx
-        nextY = Math.round(nextY / snapGridPx) * snapGridPx
-      }
+      // For each selected id, compute target x/y based on its start
+      drag.selectedIds.forEach((id) => {
+        const start = drag.startPositions[id]
+        if (!start) return
+        let nextX = Math.round(start.x + dx)
+        let nextY = Math.round(start.y + dy)
 
-      // Clamp to print area
-      let vGuide = false
-      let hGuide = false
-      if (printArea) {
-        const layer = layers.find(l => l.id === drag.layerId)
-        const minPad = 16
-        const layerWidth = layer && layer.type === 'image' ? layer.width : minPad
-        const layerHeight = layer && layer.type === 'image' ? layer.height : minPad
-        const maxX = printArea.x + Math.max(0, printArea.width - layerWidth)
-        const maxY = printArea.y + Math.max(0, printArea.height - layerHeight)
-        nextX = Math.min(Math.max(nextX, printArea.x), maxX)
-        nextY = Math.min(Math.max(nextY, printArea.y), maxY)
+        // Grid snapping
+        if (snapGridPx > 0) {
+          nextX = Math.round(nextX / snapGridPx) * snapGridPx
+          nextY = Math.round(nextY / snapGridPx) * snapGridPx
+        }
 
-        // Center guide snapping (images preferred)
-        if (showGuides && layer) {
-          const centerThreshold = 6
-          const paCenterX = printArea.x + printArea.width / 2
-          const paCenterY = printArea.y + printArea.height / 2
-          const lCenterX = nextX + (layer.type === 'image' ? layer.width / 2 : minPad / 2)
-          const lCenterY = nextY + (layer.type === 'image' ? layer.height / 2 : minPad / 2)
-          if (Math.abs(lCenterX - paCenterX) <= centerThreshold) {
-            // snap X so layer is horizontally centered
-            nextX = Math.round(paCenterX - (layer.type === 'image' ? layer.width / 2 : minPad / 2))
-            vGuide = true
-          }
-          if (Math.abs(lCenterY - paCenterY) <= centerThreshold) {
-            nextY = Math.round(paCenterY - (layer.type === 'image' ? layer.height / 2 : minPad / 2))
-            hGuide = true
+        // Clamp to print area (individually)
+        let vGuide = false
+        let hGuide = false
+        if (printArea) {
+          const layer = layers.find(l => l.id === id)
+          const minPad = 16
+          const layerWidth = layer && layer.type === 'image' ? layer.width : minPad
+          const layerHeight = layer && layer.type === 'image' ? layer.height : minPad
+          const maxX = printArea.x + Math.max(0, printArea.width - layerWidth)
+          const maxY = printArea.y + Math.max(0, printArea.height - layerHeight)
+          nextX = Math.min(Math.max(nextX, printArea.x), maxX)
+          nextY = Math.min(Math.max(nextY, printArea.y), maxY)
+
+          // Center guides only for primary dragged layer
+          if (showGuides && id === drag.layerId && layer) {
+            const centerThreshold = 6
+            const paCenterX = printArea.x + printArea.width / 2
+            const paCenterY = printArea.y + printArea.height / 2
+            const lCenterX = nextX + (layer.type === 'image' ? layer.width / 2 : minPad / 2)
+            const lCenterY = nextY + (layer.type === 'image' ? layer.height / 2 : minPad / 2)
+            if (Math.abs(lCenterX - paCenterX) <= centerThreshold) {
+              nextX = Math.round(paCenterX - (layer.type === 'image' ? layer.width / 2 : minPad / 2))
+              vGuide = true
+            }
+            if (Math.abs(lCenterY - paCenterY) <= centerThreshold) {
+              nextY = Math.round(paCenterY - (layer.type === 'image' ? layer.height / 2 : minPad / 2))
+              hGuide = true
+            }
           }
         }
-      }
 
-      setShowVGuide(vGuide)
-      setShowHGuide(hGuide)
-      onMoveLayer(drag.layerId, nextX, nextY)
+        if (id === drag.layerId) {
+          setShowVGuide(vGuide)
+          setShowHGuide(hGuide)
+        }
+
+        onMoveLayer(id, nextX, nextY)
+      })
     }
     function handleMouseUp() {
       if (drag) {
@@ -99,15 +108,25 @@ export function DesignStage(props: DesignStageProps) {
 
   function onLayerMouseDown(e: React.MouseEvent, layer: DesignLayer) {
     e.stopPropagation()
-    onSelectLayer(layer.id)
+    const additive = e.ctrlKey || e.metaKey
+    onSelectLayer(layer.id, { additive })
     if (layer.locked) return
     onDragStart && onDragStart()
+
+    // Determine which ids to move: if layer is in selection, move all selected; otherwise move only this one
+    const activeIds = selectedLayerIds.includes(layer.id) ? selectedLayerIds : [layer.id]
+    const startPositions: Record<string, { x: number; y: number }> = {}
+    activeIds.forEach(id => {
+      const l = layers.find(x => x.id === id)
+      if (l) startPositions[id] = { x: l.x, y: l.y }
+    })
+
     setDrag({
       layerId: layer.id,
       startMouseX: e.clientX,
       startMouseY: e.clientY,
-      startX: layer.x,
-      startY: layer.y,
+      selectedIds: activeIds,
+      startPositions,
     })
   }
 
@@ -132,7 +151,7 @@ export function DesignStage(props: DesignStageProps) {
         </>
       )}
       {layers.map((layer) => {
-        const isSelected = layer.id === selectedLayerId
+        const isSelected = layer.id === selectedLayerId || selectedLayerIds.includes(layer.id)
         const baseStyle: React.CSSProperties = {
           position: 'absolute',
           left: 0,

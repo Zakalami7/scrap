@@ -7,6 +7,7 @@ import { calculatePrice } from '../utils/pricing'
 import { toPng } from 'html-to-image'
 import type { ImageLayer } from '../types/design'
 import { generateBatPdf } from '../utils/bat'
+import { designToSvgString, downloadSvg } from '../utils/svg'
 
 function generateId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 8)}_${Date.now().toString(36)}`
@@ -36,6 +37,7 @@ const INITIAL_STATE: DesignState = {
     } as TextLayer,
   ],
   selectedLayerId: undefined,
+  selectedLayerIds: [],
 }
 
 const PRINT_ZONES: Record<ProductType, { x: number; y: number; width: number; height: number }> = {
@@ -66,8 +68,22 @@ export function Cree() {
     setState(prev => ({ ...prev, ...partial }))
   }
 
-  function onSelectLayer(layerId: string) {
-    updateState({ selectedLayerId: layerId || undefined }, false)
+  function onSelectLayer(layerId: string, options?: { additive?: boolean }) {
+    // Clear when background or empty
+    if (!layerId) {
+      updateState({ selectedLayerId: undefined, selectedLayerIds: [] }, false)
+      return
+    }
+    const additive = !!options?.additive
+    if (additive) {
+      const exists = state.selectedLayerIds?.includes(layerId)
+      const nextIds = exists
+        ? (state.selectedLayerIds || []).filter(id => id !== layerId)
+        : [ ...(state.selectedLayerIds || []), layerId ]
+      updateState({ selectedLayerIds: nextIds, selectedLayerId: nextIds[nextIds.length - 1] }, false)
+    } else {
+      updateState({ selectedLayerIds: [layerId], selectedLayerId: layerId }, false)
+    }
   }
 
   function onMoveLayer(layerId: string, x: number, y: number) {
@@ -108,7 +124,7 @@ export function Cree() {
       opacity: 1,
       locked: false,
     }
-    setState(prev => ({ ...prev, layers: [...prev.layers, newLayer], selectedLayerId: newLayer.id }))
+    setState(prev => ({ ...prev, layers: [...prev.layers, newLayer], selectedLayerId: newLayer.id, selectedLayerIds: [newLayer.id] }))
   }
 
   function onToggleLock() {
@@ -148,11 +164,28 @@ export function Cree() {
           opacity: 1,
           locked: false,
         }
-        setState(prev => ({ ...prev, layers: [...prev.layers, newLayer], selectedLayerId: newLayer.id }))
+        setState(prev => ({ ...prev, layers: [...prev.layers, newLayer], selectedLayerId: newLayer.id, selectedLayerIds: [newLayer.id] }))
       }
       img.src = src
     }
     reader.readAsDataURL(file)
+  }
+
+  function duplicateSelected() {
+    const ids = state.selectedLayerIds && state.selectedLayerIds.length > 0
+      ? state.selectedLayerIds
+      : (state.selectedLayerId ? [state.selectedLayerId] : [])
+    if (ids.length === 0) return
+    pushHistory()
+    const offset = 12
+    const originals = state.layers.filter(l => ids.includes(l.id))
+    const duplicates: DesignLayer[] = originals.map(l => {
+      const base = { ...l, id: generateId('dup'), x: l.x + offset, y: l.y + offset }
+      return base
+    })
+    const nextLayers = [...state.layers, ...duplicates]
+    const nextIds = duplicates.map(d => d.id)
+    setState(prev => ({ ...prev, layers: nextLayers, selectedLayerId: nextIds[nextIds.length - 1], selectedLayerIds: nextIds }))
   }
 
   function undo() {
@@ -184,8 +217,12 @@ export function Cree() {
       } else if ((isMod && e.key.toLowerCase() === 'y') || (isMod && e.key.toLowerCase() === 'z' && e.shiftKey)) {
         e.preventDefault()
         redo()
+      } else if (isMod && e.key.toLowerCase() === 'd') {
+        e.preventDefault()
+        duplicateSelected()
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (state.selectedLayerId) {
+        const hasMulti = (state.selectedLayerIds?.length || 0) > 0
+        if (state.selectedLayerId || hasMulti) {
           e.preventDefault()
           onDeleteSelected()
         }
@@ -193,7 +230,7 @@ export function Cree() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [state.selectedLayerId, state])
+  }, [state.selectedLayerId, state.selectedLayerIds, state])
 
   async function onExportPNG() {
     if (!stageWrapperRef.current) return
@@ -211,6 +248,12 @@ export function Cree() {
       state.product === 'cup-25' ? 'Gobelet 25cl' : state.product === 'cup-50' ? 'Gobelet 50cl' : state.product === 'cup-wine' ? 'Verre à vin' : state.product === 'cup-shot' ? 'Shooter' : 'Pinte'
     const pdf = await generateBatPdf({ previewDataUrl: dataUrl, productLabel, quantity })
     pdf.save('cree-bat.pdf')
+  }
+
+  function onExportSVG() {
+    const printArea = PRINT_ZONES[state.product]
+    const svg = designToSvgString(state, { printArea })
+    downloadSvg(svg)
   }
 
   function saveToLocal() {
@@ -252,12 +295,16 @@ export function Cree() {
   }
 
   function onDeleteSelected() {
-    if (!state.selectedLayerId) return
+    const ids = state.selectedLayerIds && state.selectedLayerIds.length > 0
+      ? state.selectedLayerIds
+      : (state.selectedLayerId ? [state.selectedLayerId] : [])
+    if (ids.length === 0) return
     pushHistory()
     setState(prev => ({
       ...prev,
-      layers: prev.layers.filter(l => l.id !== prev.selectedLayerId),
+      layers: prev.layers.filter(l => !ids.includes(l.id)),
       selectedLayerId: undefined,
+      selectedLayerIds: [],
     }))
   }
 
@@ -365,6 +412,9 @@ export function Cree() {
             </div>
           )}
           <div className="control-group">
+            <button onClick={duplicateSelected} disabled={((state.selectedLayerIds?.length || 0) === 0 && !state.selectedLayerId)}>Dupliquer (Ctrl+D)</button>
+          </div>
+          <div className="control-group">
             <label>Rotation</label>
             <input
               type="range"
@@ -400,6 +450,7 @@ export function Cree() {
           <div className="control-group">
             <button onClick={onExportPNG}>Exporter PNG</button>
             <button onClick={onExportBAT}>Exporter BAT (PDF)</button>
+            <button onClick={onExportSVG}>Exporter SVG</button>
           </div>
           <div className="control-group">
             <button onClick={undo} disabled={past.length === 0}>Annuler (Ctrl/Cmd+Z)</button>
@@ -420,6 +471,7 @@ export function Cree() {
           <DesignStage
             layers={state.layers}
             selectedLayerId={state.selectedLayerId}
+            selectedLayerIds={state.selectedLayerIds}
             onSelectLayer={onSelectLayer}
             onMoveLayer={onMoveLayer}
             onUpdateLayer={onUpdateLayer}

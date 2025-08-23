@@ -34,4 +34,5 @@ export interface DesignState {
   productColorHex: string
   layers: DesignLayer[]
   selectedLayerId?: string
+  selectedLayerIds?: string[]
 }
